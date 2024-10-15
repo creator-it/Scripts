@@ -1,0 +1,213 @@
+---
+- name: Server Setup
+  hosts: win
+  gather_facts: no
+  tasks:
+    - name: Execute local PowerShell script remotely
+      script: script_name.ps1
+
+    - name: Get number of item from perticuler forlder with who matches the names of dir
+      win_shell: (Get-ChildItem -Path "C:\ProgramData\" -Recurse -Directory | Where-Object { $_.Name -match "xyz" -or $_.Name -match "zyx" -or $_.Name -match "abc"} | ForEach-Object { Get-ChildItem -Path $_.FullName -Recurse -File } | Measure-Object).Count
+
+    - name: Get the total size excluding the defined folder
+      win_shell: (Get-ChildItem -Path "C:\ProgramData\" -Recurse -Force | Where-Object { $_.FullName -notlike "*\ProgramData\DatabaseBackup\*" } | Measure-Object -Property Length -Sum).Sum / 1GB
+
+    - name: Get active local users
+      win_shell: |
+        $localUsers = (Get-LocalUser | Where-Object { $_.Name -notin @("Administrator", "DefaultAccount", "Guest") -and $_.Enabled -eq $true } | Select-Object Name)
+        $localUsers
+      register: local_users_output
+
+    - name: Create local user accounts
+      win_user:
+        name: "User name"
+        password: "Password"
+        state: present
+        groups: Remote Desktop Users, Users
+        password_never_expires: yes
+        user_cannot_change_password: yes
+
+    - name: Update password for a local Windows user
+      win_user:
+        name: 'administrator'   # Replace with the actual username
+        password: '@&#*($^&@*#HF'  # Replace with the new password
+        update_password: always
+
+    - name: Load user profiles
+      win_user_profile:
+        username: user name
+        state: present
+
+    - name: Set System computer Name
+      win_hostname:
+        name: "Name"
+
+    - name: Update timezone on Windows server
+      community.windows.win_timezone:
+        timezone: Pacific Standard Time
+
+    - name: Disable IE ESC for Administrator
+      ansible.windows.win_regedit:
+        path: HKLM:\SOFTWARE\Microsoft\Active Setup\Installed Components\{A509B1A7-37EF-4b3f-8CFC-4F3A74704073}
+        name: IsInstalled
+        data: 0
+        type: dword
+
+    - name: Enable IE ESC for Users
+      ansible.windows.win_regedit:
+        path: HKLM:\SOFTWARE\Microsoft\Active Setup\Installed Components\{A509B1A8-37EF-4b3f-8CFC-4F3A74704073}
+        name: IsInstalled
+        data: "1"
+        type: dword
+
+    - name: Disable UAC Setting
+      ansible.windows.win_regedit:
+        path: HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Policies\System
+        name: EnableLUA
+        data: 0
+        type: dword
+
+    - name: Creating Firewall Rule for RDP
+      win_shell: New-NetFirewallRule -DisplayName "RDP" -Direction Inbound -LocalPort 3941 -Protocol TCP -Action Allow
+
+    - name: Custom RDP Port Setup
+      ansible.windows.win_regedit:
+        path: HKLM:\SYSTEM\CurrentControlSet\Control\Terminal Server\WinStations\RDP-Tcp
+        name: PortNumber
+        data: 3941
+        type: dword
+
+    - name: Create Group for user accounts
+      ansible.windows.win_group:
+        name: Group Name
+        state: present
+
+    - name: Delete file
+      win_file:
+        path: C:\Program Files (x86)\filename
+        state: absent
+
+    - name: Ensure destination Dir is exising if not then it will create it
+      win_file:
+        path: C:\Windows\System32\LogFiles\Firewall\
+        state: Directory
+
+    - name: Extracting (unzip) file
+      win_unzip: 
+        src: C:\Program Files (x86)\ASI\file.zip
+        dest: C:\Program Files (x86)\ASI
+
+     - name: Copy - pesting file
+      ansible.windows.win_copy:
+       src: ./User_policy/S-1-5-32-545/User/comment.cmtx
+       dest: C:\Windows\System32\comment.cmtx
+
+    - name: Import .reg file
+      win_shell: reg import C:\Users\username\Desktop\reg_file.reg
+
+    - name: Update registery value
+      ansible.windows.win_regedit:
+        path: HKLM:\SOFTWARE\WOW6432Node\
+        name: isServer
+        data: 1
+        type: String
+
+    - name: Giving Permmission to registery
+      ansible.windows.win_acl:
+        path: HKLM:\SOFTWARE\WOW6432Node\name # Replace with your path
+        user: Remote Desktop Users
+        rights: FullControl
+        type: allow
+        state: present
+        inherit: ContainerInherit, ObjectInherit
+        propagation: 'None'
+
+    - name: Giving Permmission to folder (dir).
+      ansible.windows.win_acl:
+        path: C:\ProgramData
+        user: Remote Desktop Users
+        rights: FullControl
+        type: allow
+
+    - name: Disable and Stop windows services i.e (IIS)
+      win_service:
+        name: "W3SVC"
+        start_mode: "disabled"
+        state: "stopped"
+
+    - name: Enable and Start Windows Services i.e (windows update service)
+      win_service:
+        name: "wuauserv"
+        start_mode: "auto"
+        state: "started"
+
+    - name: Install windows update but not reboot
+      ansible.windows.win_updates:
+        category_names: '*'
+        reboot: false
+
+    - name: Restart Windows Server
+      win_reboot:
+
+    - name: Changeing Name of files (Rename)
+      win_shell: Rename-Item -Path 'C:\Windows\System32\inetsrv\Config\filename.config' -NewName filename_new.config
+
+    - name: Importing SSL Certificate
+      win_shell: Get-Command -Module PKIClient; Import-PfxCertificate -FilePath C:\Users\user_name\Documents\certificate.pfx cert:\localMachine\my -Password (ConvertTo-SecureString -String "Admin@123" -Force -AsPlainText)
+
+    - name: What is my IP? to get server ip
+      win_shell: (Invoke-WebRequest -Uri "https://api.ipify.org/" -UseBasicParsing).Content.Trim()
+      register: ip
+
+    - name: Wait for 2 minutes
+      pause:
+        minutes: 5
+
+    - name: Define list of users to log off
+      set_fact:
+        users_to_log_off:
+          - administrator
+          - list
+
+    - name: Send message to users
+      win_shell: |
+        $msg = "We will be performing a system upgrade shortly. In 5 minutes, 
+
+        The website will be down for approximately 30 minutes.
+
+        If you have any questions, please contact us at 1 (800) 431-4786"
+
+        MSG {{ item }} /Server: $msg
+      loop: "{{ users_to_log_off }}"
+      ignore_errors: yes
+
+    - name: Disable specific users on Windows
+      win_shell: Disable-LocalUser -Name "{{ item }}"
+      loop: "{{ users_to_log_off }}"
+
+    - name: Log off a specific user on Windows
+      win_shell: |
+        $username = "{{ item }}"
+        $session = (quser $username | Select-String -Pattern ' (\d+)').Matches[0].Groups[1].Value
+        logoff $session
+      loop: "{{ users_to_log_off }}"
+      ignore_errors: yes
+
+
+  #Send slack-message
+- name: WebServer Setup
+  hosts: win
+  connection: local
+  gather_facts: no
+  vars:
+    slack_token: "xoxb-token"
+    slack_channel: "#db_upload_fail"
+    slack_message: {"msg":
+    ["server1", "server2", "server3"]}
+  tasks:
+    - name: Send message to Slack
+      community.general.slack:
+        token: "{{ slack_token }}"
+        channel: "{{ slack_channel }}"
+        msg: "{{ slack_message }}"
+      delegate_to: localhost
