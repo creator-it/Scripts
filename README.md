@@ -1,2 +1,2 @@
-# ansible
-this repo wii cover all information of windows automation with ansible.
+# Scripts
+this repo wii cover all information of windows automation in ps1, python, ansible ext...
